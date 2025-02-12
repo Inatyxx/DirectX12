@@ -10,7 +10,9 @@
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 
+void Init();
 void Resize();
+void mainloop();
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -68,7 +70,6 @@ D3D12_VIEWPORT viewPort;
 D3D12_RECT mScissorRect = { 0, 0, 800 / 2, 600 / 2 };
 
 bool FullScreen = false;
-
 
 void Init()
 {
@@ -328,128 +329,120 @@ void Init()
 
 bool InitializeWindow(HINSTANCE hInstance, int ShowWnd, int width, int height, bool fullscreen)
 {
-	if (fullscreen)
-	{
-		HMONITOR hmon = MonitorFromWindow(hMainWnd, MONITOR_DEFAULTTONEAREST);
-		MONITORINFO mi = { sizeof(mi) };
-		GetMonitorInfo(hmon, &mi);
+    if (fullscreen)
+    {
+        HMONITOR hmon = MonitorFromWindow(hMainWnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi = { sizeof(mi) };
+        GetMonitorInfo(hmon, &mi);
 
-		width = mi.rcMonitor.right - mi.rcMonitor.left;
-		height = mi.rcMonitor.bottom - mi.rcMonitor.top;
-	}
+        width = mi.rcMonitor.right - mi.rcMonitor.left;
+        height = mi.rcMonitor.bottom - mi.rcMonitor.top;
+    }
 
-	// Creation de l'instance de l'application
-	HINSTANCE mhAppInst = GetModuleHandle(nullptr);
-	if (mhAppInst == nullptr)
-	{
-		std::cerr << "Erreur : l'instance de l'application n'a pas ?t? cr??e" << std::endl;
-		return false;
-	}
+    // Creation de l'instance de l'application
+    HINSTANCE mhAppInst = GetModuleHandle(nullptr);
+    if (mhAppInst == nullptr)
+    {
+        std::cerr << "Erreur : l'instance de l'application n'a pas été créée" << std::endl;
+        return false;
+    }
 
-	WNDCLASS wc;
+    WNDCLASS wc = {};
 
-	wc.style = CS_HREDRAW | CS_VREDRAW;
-	wc.lpfnWndProc = WndProc;
-	wc.cbClsExtra = NULL;
-	wc.cbWndExtra = NULL;
-	wc.hInstance = hInstance;
-	wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-	wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 2);
-	wc.lpszMenuName = NULL;
-	wc.lpszClassName = WindowName;
+    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.lpfnWndProc = WndProc;
+    wc.cbClsExtra = NULL;
+    wc.cbWndExtra = NULL;
+    wc.hInstance = hInstance;
+    wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 2);
+    wc.lpszMenuName = NULL;
+    wc.lpszClassName = WindowName;
 
-	if (!RegisterClass(&wc))
-	{
-		MessageBox(0, L"RegisterClass Failed.", 0, 0);
-		return false;
-	}
+    if (!RegisterClass(&wc))
+    {
+        MessageBox(0, L"RegisterClass Failed.", 0, 0);
+        return false;
+    }
 
-	// Creation de la fen?tre
-	RECT R = { 0, 0, 800, 600 };
-	AdjustWindowRect(&R, WS_OVERLAPPEDWINDOW, false);
-	int rWidth = R.right - R.left;
-	int rHeight = R.bottom - R.top;
+    // Creation de la fenêtre
+    RECT R = { 0, 0, 800, 600 };
+    AdjustWindowRect(&R, WS_OVERLAPPEDWINDOW, false);
+    int rWidth = R.right - R.left;
+    int rHeight = R.bottom - R.top;
 
-	hMainWnd = CreateWindowEx(NULL, WindowName, WindowTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, width, height, NULL, NULL, hInstance, NULL);
-	if (!hMainWnd)
-	{
-		MessageBox(0, L"CreateWindow Failed.", 0, 0);
-		return false;
-	}
+    hMainWnd = CreateWindowEx(NULL, WindowName, WindowTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, width, height, NULL, NULL, hInstance, NULL);
+    if (!hMainWnd)
+    {
+        MessageBox(0, L"CreateWindow Failed.", 0, 0);
+        return false;
+    }
 
-	if (fullscreen)
-	{
-		SetWindowLong(hMainWnd, GWL_STYLE, 0);
-	}
+    if (fullscreen)
+    {
+        SetWindowLong(hMainWnd, GWL_STYLE, 0);
+    }
 
-	ShowWindow(hMainWnd, ShowWnd);
-	UpdateWindow(hMainWnd);
+    ShowWindow(hMainWnd, SW_SHOW);
+    UpdateWindow(hMainWnd);
 
-	Init(); // DirectX12 Init
+    Init(); // DirectX12 Init
 
-	return true;
+    return true;
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	switch (msg)
-	{
+    switch (msg)
+    {
+    case WM_KEYDOWN:
+        if (wParam == VK_ESCAPE) {
+            if (MessageBox(0, L"Are you sure you want to exit?",
+                L"Really?", MB_YESNO | MB_ICONQUESTION) == IDYES)
+                DestroyWindow(hwnd);
+        }
+        return 0;
 
-	case WM_KEYDOWN:
-		if (wParam == VK_ESCAPE) {
-			if (MessageBox(0, L"Are you sure you want to exit?",
-				L"Really?", MB_YESNO | MB_ICONQUESTION) == IDYES)
-				DestroyWindow(hwnd);
-		}
-		return 0;
-
-	case WM_DESTROY:
-		PostQuitMessage(0);
-		return 0;
-	}
-	return DefWindowProc(hwnd,
-		msg,
-		wParam,
-		lParam);
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+    }
+    return DefWindowProc(hwnd, msg, wParam, lParam);
 }
-
-void mainloop() {
-	MSG msg;
-	ZeroMemory(&msg, sizeof(MSG));
-
-	while (true)
-	{
-		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
-		{
-			if (msg.message == WM_QUIT)
-				break;
-
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
-		}
-		else {
-			// run game code
-		}
-	}
-}
-
-//
 
 int WINAPI main(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
 {
-	// create the window
-	if (!InitializeWindow(hInstance, nShowCmd, 800, 600, false))
-	{
-		MessageBox(0, L"Window Initialization - Failed",
-			L"Error", MB_OK);
-		return 0;
-	}
+    // create the window
+    if (!InitializeWindow(hInstance, nShowCmd, 800, 600, false))
+    {
+        MessageBox(0, L"Window Initialization - Failed",
+            L"Error", MB_OK);
+        return 0;
+    }
+    mainloop();
 
-	// start the main loop
-	mainloop();
+    return 0;
+}
 
-	return 0;
+void mainloop() {
+    MSG msg;
+    ZeroMemory(&msg, sizeof(MSG));
+
+    while (true)
+    {
+        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+        {
+            if (msg.message == WM_QUIT)
+                break;
+
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+        else {
+            // run game code
+        }
+    }
 }
 
 void Resize()
@@ -462,9 +455,6 @@ void Resize()
 	// Advance the fence value to mark commands up to this fence point.
 	mCurrentFence++;
 
-	// Add an instruction to the command queue to set a new fence point.  Because we 
-	// are on the GPU timeline, the new fence point won't be set until the GPU finishes
-	// processing all the commands prior to this Signal().
 	commandQueue->Signal(fence, mCurrentFence);
 
 	// Wait until the GPU has completed commands up to this fence point.
@@ -514,11 +504,6 @@ void Resize()
 	depthStencilDesc.DepthOrArraySize = 1;
 	depthStencilDesc.MipLevels = 1;
 
-	// Correction 11/12/2016: SSAO chapter requires an SRV to the depth buffer to read from 
-	// the depth buffer.  Therefore, because we need to create two views to the same resource:
-	//   1. SRV format: DXGI_FORMAT_R24_UNORM_X8_TYPELESS
-	//   2. DSV Format: DXGI_FORMAT_D24_UNORM_S8_UINT
-	// we need to create the depth buffer resource with a typeless format.  
 	depthStencilDesc.Format = DXGI_FORMAT_R24G8_TYPELESS;
 
 	depthStencilDesc.SampleDesc.Count = canUseMSAA ? 4 : 1;
