@@ -69,32 +69,6 @@ D3D12_RECT mScissorRect = { 0, 0, 800 / 2, 600 / 2 };
 
 bool FullScreen = false;
 
-LRESULT __stdcall CreateWindow(HINSTANCE hInstance, int ShowWnd, int width, int height, bool fullscreen) {
-	WNDCLASSEX wc;
-	wc.cbSize = sizeof(WNDCLASSEX);
-	wc.style = CS_HREDRAW | CS_VREDRAW;
-	wc.lpfnWndProc = WndProc;
-	wc.cbClsExtra = NULL;
-	wc.cbWndExtra = NULL;
-	wc.hInstance = hInstance;
-	wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-	wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 2);
-	wc.lpszMenuName = NULL;
-	wc.lpszClassName = WindowName;
-	wc.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
-	if (!RegisterClassEx(&wc)) {
-		MessageBox(NULL, L"Error registering class", L"Error", MB_OK | MB_ICONERROR);
-	}
-	hMainWnd = CreateWindowEx(NULL, WindowName, WindowTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, width, height, NULL, NULL, hInstance, NULL);
-	if (!hMainWnd) {
-		MessageBox(NULL, L"Error creating window", L"Error", MB_OK | MB_ICONERROR);
-	}
-	if (fullscreen) {
-		SetWindowLong(hMainWnd, GWL_STYLE, 0);
-	}
-	ShowWindow(hMainWnd, ShowWnd);
-	UpdateWindow(hMainWnd);
 
 void Init()
 {
