@@ -326,11 +326,11 @@ void Init()
         }
     }
     //Create Swapchain
-    factory->CreateSwapChain(commandQueue, &SwapChainDesc, (IDXGISwapChain**)&swapchain),"Failed to create Swapchain";
+    factory->CreateSwapChain(commandQueue, &swapChainDesc, (IDXGISwapChain**)&swapChain),"Failed to create Swapchain";
 
 
     //Query Interface
-    swapchain->QueryInterface(IID_PPV_ARGS(&swapchain)),"Failed to Query Interface to Swapchain4";
+    swapChain->QueryInterface(IID_PPV_ARGS(&swapChain)),"Failed to Query Interface to Swapchain4";
 
 
     // Create RTV Descriptor Heap
@@ -340,12 +340,13 @@ void Init()
     rtvHeapDesc.NumDescriptors = 2;
     rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 
-    device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&rtvHeap)),"Failed to Create RTV Descriptor Heap";
+    device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&RTVDescriptorHeap)),"Failed to Create RTV Descriptor Heap";
 
-    D3D12_CPU_DESCRIPTOR_HANDLE cpu_handle = RTVDescriptorHeapDesc.GetCPUDescriptorHandleForHeapStart();
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu_handle = RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+
     for (int n = 0; n < 2; n++)
     {
-        swapChainDesc.GetBuffer(n, IID_PPV_ARGS(&rtBuffers[n])),"Swapchain::GetBuffer Failed!";
+        swapChain->GetBuffer(n, IID_PPV_ARGS(&rtBuffers[n])),"Swapchain::GetBuffer Failed!";
 
         device->CreateRenderTargetView(rtBuffers[n], nullptr, cpu_handle);
 
@@ -470,13 +471,13 @@ void Init()
 
     PSO_Desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     PSO_Desc.NumRenderTargets = 1;
-    PSO_Desc.RTVFormats[0] = SwapChainDesc.BufferDesc.Format;
+    PSO_Desc.RTVFormats[0] = swapChainDesc.BufferDesc.Format;
 
     //Create PSO
     device->CreateGraphicsPipelineState(&PSO_Desc, IID_PPV_ARGS(&PSO)),"Failed to Create PSO";
 
     //Create Fence
-    device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Fence)), "Failed to Create Fence";
+    device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)), "Failed to Create Fence";
 
     //Create Command List
     device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator, PSO, IID_PPV_ARGS(&commandList)), "Failed to create Command List";
@@ -489,7 +490,7 @@ void Init()
 
 void Render()
 {
-    if (swapchain)
+    if (swapChain)
     {
         //Reset Command List and Allocator
         commandAllocator->Reset();
@@ -517,15 +518,15 @@ void Render()
         D3D12_RESOURCE_BARRIER rb1 = {};
         rb1.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
         rb1.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-        rb1.Transition.pResource = rtBuffers[swapchain->GetCurrentBackBufferIndex()];
+        rb1.Transition.pResource = rtBuffers[swapChain->GetCurrentBackBufferIndex()];
         rb1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
         rb1.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
         rb1.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         commandList->ResourceBarrier(1, &rb1);
 
         //Set RenderTargets
-        D3D12_CPU_DESCRIPTOR_HANDLE cpu_handle = rtvHeap->GetCPUDescriptorHandleForHeapStart();
-        cpu_handle.ptr += swapchain->GetCurrentBackBufferIndex() * device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+        D3D12_CPU_DESCRIPTOR_HANDLE cpu_handle = RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+        cpu_handle.ptr += swapChain->GetCurrentBackBufferIndex() * device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
         commandList->OMSetRenderTargets(1, &cpu_handle, false, nullptr);
 
         //Clear Render Target View
@@ -541,7 +542,7 @@ void Render()
         D3D12_RESOURCE_BARRIER rb2 = {};
         rb2.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
         rb2.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-        rb2.Transition.pResource = rtBuffers[swapchain->GetCurrentBackBufferIndex()];
+        rb2.Transition.pResource = rtBuffers[swapChain->GetCurrentBackBufferIndex()];
         rb2.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
         rb2.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
         rb2.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
@@ -552,16 +553,16 @@ void Render()
         commandQueue->ExecuteCommandLists(1, (ID3D12CommandList* const*)&commandList);
 
         //Wait For Command Queue
-        Fence->Signal(0);
-        commandQueue->Signal(Fence, 1);
+        fence->Signal(0);
+        commandQueue->Signal(fence, 1);
 
-        while (Fence->GetCompletedValue() == 0)
+        while (fence->GetCompletedValue() == 0)
         {
 
         }
 
         //Present
-        swapchain->Present(1, 0);
+        swapChain->Present(1, 0);
     }
 }
 
