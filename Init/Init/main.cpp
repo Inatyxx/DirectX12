@@ -41,7 +41,7 @@ LPCTSTR WindowName = L"DirectX12";
 LPCTSTR WindowTitle = L"Youpii";
 
 ID3D12Device* device = nullptr;
-IDXGISwapChain* swapChain = nullptr;
+IDXGISwapChain3* swapChain = nullptr;
 
 // Command List, Allocator et Queue
 ID3D12GraphicsCommandList* commandList = nullptr;
@@ -74,7 +74,7 @@ D3D12_DESCRIPTOR_HEAP_DESC RTVDescriptorHeapDesc;
 D3D12_DESCRIPTOR_HEAP_DESC DSVDescriptorHeapDesc;
 
 ID3D12Resource* VertexBuffer = nullptr;
-D3D12_VERTEX_BUFFER_VIEW* VertexBufferView = nullptr;
+D3D12_VERTEX_BUFFER_VIEW* vertexBufferView = nullptr;
 
 
 // Descriptor Size
@@ -87,7 +87,6 @@ std::unique_ptr<UploadBuffer<ObjectConstants>> mObjectCB = nullptr;
 std::unique_ptr<MeshGeometry> mBoxGeo = nullptr;
 D3D12_VERTEX_BUFFER_VIEW mBoxVBView;
 ID3D12Resource* rtBuffers[2];
-D3D12_VERTEX_BUFFER_VIEW vertexBufferView;
 
 bool canUseMSAA = false;
 UINT m4xMsaaQuality = 0; // Qualite du MSAA utilise sur l'appareil
@@ -586,7 +585,7 @@ void Render()
 
         //Draw Triangle
         commandList->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
+        commandList->IASetVertexBuffers(0, 1, vertexBufferView);
         commandList->DrawInstanced(3, 1, 0, 0);
 
         //Indicate that Backbuffer will now be used to Present
@@ -880,10 +879,10 @@ void BuildTriangleGeometry()
     mBoxGeo = std::make_unique<MeshGeometry>();
     mBoxGeo->Name = "triangleGeo";
 
-    ThrowIfFailed(D3DCreateBlob(vbByteSize, &mBoxGeo->VertexBufferCPU));
+    D3DCreateBlob(vbByteSize, &mBoxGeo->VertexBufferCPU);
     CopyMemory(mBoxGeo->VertexBufferCPU->GetBufferPointer(), vertices.data(), vbByteSize);
 
-    ThrowIfFailed(D3DCreateBlob(ibByteSize, &mBoxGeo->IndexBufferCPU));
+    D3DCreateBlob(ibByteSize, &mBoxGeo->IndexBufferCPU);
     CopyMemory(mBoxGeo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
 
     mBoxGeo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(device, commandList, vertices.data(), vbByteSize, mBoxGeo->VertexBufferUploader);

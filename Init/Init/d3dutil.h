@@ -1,9 +1,3 @@
-//***************************************************************************************
-// d3dUtil.h by Frank Luna (C) 2015 All Rights Reserved.
-//
-// General helper code.
-//***************************************************************************************
-
 #pragma once
 
 #include <windows.h>
@@ -60,33 +54,6 @@ inline std::wstring AnsiToWString(const std::string& str)
     return std::wstring(buffer);
 }
 
-/*
-#if defined(_DEBUG)
-    #ifndef Assert
-    #define Assert(x, description)                                  \
-    {                                                               \
-        static bool ignoreAssert = false;                           \
-        if(!ignoreAssert && !(x))                                   \
-        {                                                           \
-            Debug::AssertResult result = Debug::ShowAssertDialog(   \
-            (L#x), description, AnsiToWString(__FILE__), __LINE__); \
-        if(result == Debug::AssertIgnore)                           \
-        {                                                           \
-            ignoreAssert = true;                                    \
-        }                                                           \
-                    else if(result == Debug::AssertBreak)           \
-        {                                                           \
-            __debugbreak();                                         \
-        }                                                           \
-        }                                                           \
-    }
-    #endif
-#else
-    #ifndef Assert
-    #define Assert(x, description)
-    #endif
-#endif
-    */
 
 class d3dUtil
 {
@@ -98,30 +65,19 @@ public:
 
     static UINT CalcConstantBufferByteSize(UINT byteSize)
     {
-        // Constant buffers must be a multiple of the minimum hardware
-        // allocation size (usually 256 bytes).  So round up to nearest
-        // multiple of 256.  We do this by adding 255 and then masking off
-        // the lower 2 bytes which store all bits < 256.
-        // Example: Suppose byteSize = 300.
-        // (300 + 255) & ~255
-        // 555 & ~255
-        // 0x022B & ~0x00ff
-        // 0x022B & 0xff00
-        // 0x0200
-        // 512
+
         return (byteSize + 255) & ~255;
     }
+static ID3DBlob* LoadBinary(const std::wstring& filename);
 
-    static Microsoft::WRL::ComPtr<ID3DBlob> LoadBinary(const std::wstring& filename);
+static ID3D12Resource* CreateDefaultBuffer(
+    ID3D12Device* device,
+    ID3D12GraphicsCommandList* cmdList,
+    const void* initData,
+    UINT64 byteSize,
+    ID3D12Resource* uploadBuffer);
 
-    static Microsoft::WRL::ComPtr<ID3D12Resource> CreateDefaultBuffer(
-        ID3D12Device* device,
-        ID3D12GraphicsCommandList* cmdList,
-        const void* initData,
-        UINT64 byteSize,
-        Microsoft::WRL::ComPtr<ID3D12Resource>& uploadBuffer);
-
-    static Microsoft::WRL::ComPtr<ID3DBlob> CompileShader(
+    static ID3DBlob* CompileShader(
         const std::wstring& filename,
         const D3D_SHADER_MACRO* defines,
         const std::string& entrypoint,
@@ -164,14 +120,14 @@ struct MeshGeometry
 
     // System memory copies.  Use Blobs because the vertex/index format can be generic.
     // It is up to the client to cast appropriately.  
-    Microsoft::WRL::ComPtr<ID3DBlob> VertexBufferCPU = nullptr;
-    Microsoft::WRL::ComPtr<ID3DBlob> IndexBufferCPU = nullptr;
+    ID3DBlob* VertexBufferCPU = nullptr;
+    ID3DBlob* IndexBufferCPU = nullptr;
 
-    Microsoft::WRL::ComPtr<ID3D12Resource> VertexBufferGPU = nullptr;
-    Microsoft::WRL::ComPtr<ID3D12Resource> IndexBufferGPU = nullptr;
+    ID3D12Resource* VertexBufferGPU = nullptr;
+    ID3D12Resource* IndexBufferGPU = nullptr;
 
-    Microsoft::WRL::ComPtr<ID3D12Resource> VertexBufferUploader = nullptr;
-    Microsoft::WRL::ComPtr<ID3D12Resource> IndexBufferUploader = nullptr;
+    ID3D12Resource* VertexBufferUploader = nullptr;
+    ID3D12Resource* IndexBufferUploader = nullptr;
 
     // Data about the buffers.
     UINT VertexByteStride = 0;
@@ -270,19 +226,6 @@ struct Texture
 
     std::wstring Filename;
 
-    Microsoft::WRL::ComPtr<ID3D12Resource> Resource = nullptr;
-    Microsoft::WRL::ComPtr<ID3D12Resource> UploadHeap = nullptr;
+    ID3D12Resource* Resource = nullptr;
+    ID3D12Resource* UploadHeap = nullptr;
 };
-
-#ifndef ThrowIfFailed
-#define ThrowIfFailed(x)                                              \
-{                                                                     \
-    HRESULT hr__ = (x);                                               \
-    std::wstring wfn = AnsiToWString(__FILE__);                       \
-    if(FAILED(hr__)) { throw DxException(hr__, L#x, wfn, __LINE__); } \
-}
-#endif
-
-#ifndef ReleaseCom
-#define ReleaseCom(x) { if(x){ x->Release(); x = 0; } }
-#endif
