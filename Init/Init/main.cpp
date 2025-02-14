@@ -6,6 +6,10 @@
 #include "d3dx12.h"
 #include <windowsX.h>
 #include <dxgidebug.h>
+#include "MathHelper.h"
+#include "d3dutil.h"
+#include "UploadBuffer.h"
+
 
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
@@ -51,6 +55,17 @@ UINT64 mCurrentFence = 0;
 ID3D12Resource* depthStencilBuffer = nullptr;
 int mCurrBackBuffer = 0;
 
+struct ObjectConstants
+{
+	XMFLOAT4X4 WorldViewProj = MathHelper::Identity4x4();
+};
+
+struct Vertex
+{
+    XMFLOAT3 Pos;
+    XMFLOAT4 Color;
+};
+
 // Creation de Descriptor Heaps
 ID3D12DescriptorHeap* RTVDescriptorHeap = nullptr; // Render Target View
 ID3D12DescriptorHeap* DSVDescriptorHeap = nullptr; // Depth Stencil View
@@ -58,10 +73,21 @@ ID3D12DescriptorHeap* DSVDescriptorHeap = nullptr; // Depth Stencil View
 D3D12_DESCRIPTOR_HEAP_DESC RTVDescriptorHeapDesc;
 D3D12_DESCRIPTOR_HEAP_DESC DSVDescriptorHeapDesc;
 
+ID3D12Resource* VertexBuffer = nullptr;
+D3D12_VERTEX_BUFFER_VIEW* VertexBufferView = nullptr;
+
+
 // Descriptor Size
 UINT mRtvDescriptorSize;
 UINT mDsvDescriptorSize;
 UINT mCbvSrvDescriptorSize;
+ID3D12RootSignature* mRootSignature = nullptr;
+ID3D12PipelineState* mPSO = nullptr;
+std::unique_ptr<UploadBuffer<ObjectConstants>> mObjectCB = nullptr;
+std::unique_ptr<MeshGeometry> mBoxGeo = nullptr;
+D3D12_VERTEX_BUFFER_VIEW mBoxVBView;
+ID3D12Resource* rtBuffers[2];
+D3D12_VERTEX_BUFFER_VIEW vertexBufferView;
 
 bool canUseMSAA = false;
 UINT m4xMsaaQuality = 0; // Qualite du MSAA utilise sur l'appareil
@@ -154,6 +180,8 @@ void Init()
     DSVDescriptorHeapDesc.NodeMask = 0;
     result = device->CreateDescriptorHeap(&DSVDescriptorHeapDesc, IID_PPV_ARGS(&DSVDescriptorHeap));
     assert(result == S_OK);
+
+    BuildTriangleGeometry();
 
     // Initialize the render target views (RTVs)
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHeapHandle(RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
@@ -334,19 +362,38 @@ void Init()
 
 
     // Create RTV Descriptor Heap
-    D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
-    rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-    rtvHeapDesc.NodeMask = 0;
-    rtvHeapDesc.NumDescriptors = 2;
-    rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+    D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc;
+    cbvHeapDesc.NumDescriptors = 1;
+    cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    cbvHeapDesc.NodeMask = 0;
+    device->CreateDescriptorHeap(&cbvHeapDesc,IID_PPV_ARGS(&RTVDescriptorHeap));
 
-    device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&RTVDescriptorHeap)),"Failed to Create RTV Descriptor Heap";
+    mObjectCB = std::make_unique<UploadBuffer<ObjectConstants>>(device, 1, true);
+
+    UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+
+    D3D12_GPU_VIRTUAL_ADDRESS cbAddress = mObjectCB->Resource()->GetGPUVirtualAddress();
+    // Offset to the ith object constant buffer in the buffer.
+    int boxCBufIndex = 0;
+    cbAddress += boxCBufIndex * objCBByteSize;
+
+    D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
+    cbvDesc.BufferLocation = cbAddress;
+    cbvDesc.SizeInBytes = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+
+    device->CreateConstantBufferView(&cbvDesc, RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+
 
     D3D12_CPU_DESCRIPTOR_HANDLE cpu_handle = RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 
     for (int n = 0; n < 2; n++)
     {
-        swapChain->GetBuffer(n, IID_PPV_ARGS(&rtBuffers[n])),"Swapchain::GetBuffer Failed!";
+        HRESULT result = swapChain->GetBuffer(n, IID_PPV_ARGS(&rtBuffers[n]));
+        if (FAILED(result)) {
+            // Gérer l'erreur ici, par exemple en affichant un message d'erreur
+            MessageBox(nullptr, L"Swapchain::GetBuffer Failed!", L"Error", MB_OK);
+        }
 
         device->CreateRenderTargetView(rtBuffers[n], nullptr, cpu_handle);
 
@@ -416,11 +463,6 @@ void Init()
     //Unmap
     VertexBuffer->Unmap(0, nullptr);
 
-    //Define View
-    VertexBufferView.BufferLocation = VertexBuffer->GetGPUVirtualAddress();
-    VertexBufferView.SizeInBytes = sizeof(VB_Data);
-    VertexBufferView.StrideInBytes = sizeof(float) * 2;
-
 
     // Create Root Signature
 
@@ -430,12 +472,36 @@ void Init()
     Root_Desc.NumStaticSamplers = 0;
     Root_Desc.NumParameters = 0;
 
+    CD3DX12_ROOT_PARAMETER slotRootParameter[1];
+
+    // Create a single descriptor table of CBVs.
+    CD3DX12_DESCRIPTOR_RANGE cbvTable;
+    cbvTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);
+    slotRootParameter[0].InitAsDescriptorTable(1, &cbvTable);
+
+    // A root signature is an array of root parameters.
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(1, slotRootParameter, 0, nullptr,
+        D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+    // create a root signature with a single slot which points to a descriptor range consisting of a single constant buffer
+    ComPtr<ID3DBlob> serializedRootSig = nullptr;
+    ComPtr<ID3DBlob> errorBlob = nullptr;
+    HRESULT hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
+        serializedRootSig.GetAddressOf(), errorBlob.GetAddressOf());
+
+    if (errorBlob != nullptr)
+    {
+        ::OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+    }
+
+    device->CreateRootSignature(0,serializedRootSig->GetBufferPointer(),serializedRootSig->GetBufferSize(),IID_PPV_ARGS(&mRootSignature));
+
     //Serialize Root Signature
     D3D12SerializeRootSignature(&Root_Desc, D3D_ROOT_SIGNATURE_VERSION_1, &RootBlob, nullptr),"Failed to Serialize Root Signature";
 
 
         //Create Root Signature
-    device->CreateRootSignature(0, RootBlob->GetBufferPointer(), RootBlob->GetBufferSize(), IID_PPV_ARGS(&RootSignature)),"Failed to Create Root Signature";
+    device->CreateRootSignature(0, RootBlob->GetBufferPointer(), RootBlob->GetBufferSize(), IID_PPV_ARGS(&mRootSignature)),"Failed to Create Root Signature";
 
 
         // Create Pipeline State Object
@@ -451,7 +517,7 @@ void Init()
 
     PSO_Desc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
 
-    PSO_Desc.pRootSignature = RootSignature;
+    PSO_Desc.pRootSignature = mRootSignature;
 
     PSO_Desc.VS.BytecodeLength = vertexShader->GetBufferSize();
     PSO_Desc.VS.pShaderBytecode = vertexShader->GetBufferPointer();
@@ -474,13 +540,13 @@ void Init()
     PSO_Desc.RTVFormats[0] = swapChainDesc.BufferDesc.Format;
 
     //Create PSO
-    device->CreateGraphicsPipelineState(&PSO_Desc, IID_PPV_ARGS(&PSO)),"Failed to Create PSO";
+    device->CreateGraphicsPipelineState(&PSO_Desc, IID_PPV_ARGS(&mPSO)),"Failed to Create PSO";
 
     //Create Fence
     device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)), "Failed to Create Fence";
 
     //Create Command List
-    device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator, PSO, IID_PPV_ARGS(&commandList)), "Failed to create Command List";
+    device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator, mPSO, IID_PPV_ARGS(&commandList)), "Failed to create Command List";
 
         commandList->Close();
 }
@@ -494,25 +560,10 @@ void Render()
     {
         //Reset Command List and Allocator
         commandAllocator->Reset();
-        commandList->Reset(commandAllocator, PSO);
-
-        //Set Viewport and Viewport Rect
-        D3D12_VIEWPORT Viewport = {};
-        D3D12_RECT ViewRect = {};
-        GetWindowRect(hWnd, &ViewRect);
-
-        Viewport.TopLeftX = 0;
-        Viewport.TopLeftY = 0;
-        Viewport.MinDepth = 0;
-        Viewport.MaxDepth = 1;
-        Viewport.Height = ViewRect.bottom - ViewRect.top;
-        Viewport.Width = ViewRect.right - ViewRect.left;
-
-        commandList->RSSetViewports(1, &Viewport);
-        commandList->RSSetScissorRects(1, &ViewRect);
+        commandList->Reset(commandAllocator, mPSO);
 
         //Set Root Signature
-        commandList->SetGraphicsRootSignature(RootSignature);
+        commandList->SetGraphicsRootSignature(mRootSignature);
 
         //Indicate that Backbuffer will be used as Render Target
         D3D12_RESOURCE_BARRIER rb1 = {};
@@ -535,7 +586,7 @@ void Render()
 
         //Draw Triangle
         commandList->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        commandList->IASetVertexBuffers(0, 1, &VertexBufferView);
+        commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
         commandList->DrawInstanced(3, 1, 0, 0);
 
         //Indicate that Backbuffer will now be used to Present
@@ -805,4 +856,49 @@ void Resize()
 		viewPort.MaxDepth = 1.0f;
 		commandList->RSSetViewports(1, &viewPort);
 	}
+}
+
+void BuildTriangleGeometry()
+{
+    // Définir les sommets pour un triangle
+    std::array<Vertex, 3> vertices =
+    {
+        Vertex({ XMFLOAT3(0.0f, 0.25f, 0.0f), XMFLOAT4(Colors::White) }),
+        Vertex({ XMFLOAT3(0.25f, -0.25f, 0.0f), XMFLOAT4(Colors::Black) }),
+        Vertex({ XMFLOAT3(-0.25f, -0.25f, 0.0f), XMFLOAT4(Colors::Red) })
+    };
+
+    // Définir les indices pour un triangle
+    std::array<std::uint16_t, 3> indices =
+    {
+        0, 1, 2
+    };
+
+    const UINT vbByteSize = (UINT)vertices.size() * sizeof(Vertex);
+    const UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
+
+    mBoxGeo = std::make_unique<MeshGeometry>();
+    mBoxGeo->Name = "triangleGeo";
+
+    ThrowIfFailed(D3DCreateBlob(vbByteSize, &mBoxGeo->VertexBufferCPU));
+    CopyMemory(mBoxGeo->VertexBufferCPU->GetBufferPointer(), vertices.data(), vbByteSize);
+
+    ThrowIfFailed(D3DCreateBlob(ibByteSize, &mBoxGeo->IndexBufferCPU));
+    CopyMemory(mBoxGeo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
+
+    mBoxGeo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(device, commandList, vertices.data(), vbByteSize, mBoxGeo->VertexBufferUploader);
+
+    mBoxGeo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(device, commandList, indices.data(), ibByteSize, mBoxGeo->IndexBufferUploader);
+
+    mBoxGeo->VertexByteStride = sizeof(Vertex);
+    mBoxGeo->VertexBufferByteSize = vbByteSize;
+    mBoxGeo->IndexFormat = DXGI_FORMAT_R16_UINT;
+    mBoxGeo->IndexBufferByteSize = ibByteSize;
+
+    SubmeshGeometry submesh;
+    submesh.IndexCount = (UINT)indices.size();
+    submesh.StartIndexLocation = 0;
+    submesh.BaseVertexLocation = 0;
+
+    mBoxGeo->DrawArgs["triangle"] = submesh;
 }
